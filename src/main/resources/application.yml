@@ -1,0 +1,91 @@
+spring:
+  application:
+    name: notification-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/notificationdb?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:notification}
+    password: ${SPRING_DATASOURCE_PASSWORD:notification}
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      properties:
+        spring.json.add.type.headers: false
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.notificationservice.*"
+        spring.json.value.default.type: "com.notificationservice.entity.NotificationEvent"
+
+# ── Kafka topic names ──────────────────────────────────────────────────────
+kafka:
+  topics:
+    email: notification.email
+    sms: notification.sms
+    push: notification.push
+    dlq: notification.dlq
+  consumer:
+    retry:
+      max-attempts: 2
+      backoff-ms: 2000
+
+# ── Mock delivery simulation ───────────────────────────────────────────────
+mock:
+  delivery:
+    failure-rate: 0.30
+
+# ── FEATURE: Rate limiting per channel ────────────────────────────────────
+rate-limit:
+  email: 10.0     # 10 permits/sec  (SMTP provider constraint)
+  sms: 50.0       # 50 permits/sec  (Twilio/carrier constraint)
+  push: 100.0     # 100 permits/sec (FCM/APNs are fast)
+
+# ── FEATURE: Outbox poller interval ───────────────────────────────────────
+outbox:
+  poll:
+    interval-ms: 2000   # poll every 2 seconds for unpublished outbox events
+
+# ── Actuator: expose all endpoints ────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: notification-service
+
+# ── Swagger ───────────────────────────────────────────────────────────────
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /api-docs
+
+# ── Logging ───────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.notificationservice: DEBUG
+    org.springframework.kafka: INFO
+    org.apache.kafka: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %highlight(%-5level) %cyan(%logger{36}) - %msg%n"
