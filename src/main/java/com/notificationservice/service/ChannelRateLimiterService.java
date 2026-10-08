@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Per-channel rate limiting using Guava's RateLimiter (token bucket algorithm).
@@ -71,9 +72,9 @@ public class ChannelRateLimiterService {
             return 0.0;
         }
 
-        long startMs = System.currentTimeMillis();
-        double waitTime = limiter.acquire(); // blocks here if rate exceeded
-        long waitMs = System.currentTimeMillis() - startMs;
+        long startedAt = System.nanoTime();
+        limiter.acquire(); // blocks here if rate exceeded
+        long waitMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
 
         if (waitMs > 50) {
             // Only log noticeable waits — sub-50ms is normal scheduling jitter
@@ -82,7 +83,7 @@ public class ChannelRateLimiterService {
             metrics.recordRateLimitWait(channel, waitMs);
         }
 
-        return waitTime;
+        return waitMs;
     }
 
     private double getRateForChannel(String channel) {

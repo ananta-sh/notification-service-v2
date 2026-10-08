@@ -40,7 +40,8 @@ import java.time.LocalDateTime;
 @Table(name = "outbox_events",
     indexes = {
         @Index(name = "idx_outbox_published", columnList = "published"),
-        @Index(name = "idx_outbox_created_at", columnList = "created_at")
+        @Index(name = "idx_outbox_created_at", columnList = "created_at"),
+        @Index(name = "idx_outbox_claim", columnList = "published, claim_until")
     }
 )
 @Data
@@ -101,6 +102,12 @@ public class OutboxEvent {
 
     @Column(name = "published_at")
     private LocalDateTime publishedAt;
+
+    @Column(name = "claim_token", length = 36)
+    private String claimToken;
+
+    @Column(name = "claim_until")
+    private LocalDateTime claimUntil;
 
     @PrePersist
     protected void onCreate() {

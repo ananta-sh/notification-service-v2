@@ -21,7 +21,7 @@ import java.util.Random;
  */
 @Service
 @Slf4j
-public class MockDeliveryService {
+public class MockDeliveryService implements NotificationDeliveryProvider {
 
     @Value("${mock.delivery.failure-rate:0.30}")
     private double failureRate;
@@ -32,6 +32,7 @@ public class MockDeliveryService {
         deliver(channel, event.getRecipient(), event.getMessage(), event.getEventId());
     }
 
+    @Override
     public void deliver(String channel, String recipient, String message, String eventId) {
 
         log.info("┌─ [{}] Attempting delivery | event={} | recipient={}",

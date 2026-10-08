@@ -1,7 +1,6 @@
 package com.notificationservice.dlq;
 
 import com.notificationservice.entity.NotificationEvent;
-import com.notificationservice.metrics.NotificationMetrics;
 import com.notificationservice.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,8 +15,6 @@ import org.springframework.stereotype.Component;
 public class DlqConsumer {
 
     private final NotificationService notificationService;
-    private final NotificationMetrics metrics;
-
     @KafkaListener(
         topics = "${kafka.topics.dlq}",
         groupId = "notification-dlq-group",
@@ -25,6 +22,11 @@ public class DlqConsumer {
     )
     public void consume(ConsumerRecord<String, NotificationEvent> record, Acknowledgment ack) {
         NotificationEvent event = record.value();
+        if (notificationService.isTerminal(event.getEventId())) {
+            log.info("[DLQ] Skipping already completed eventId={}", event.getEventId());
+            ack.acknowledge();
+            return;
+        }
         log.error("╔══════════════════════════════════════════════════════");
         log.error("║  DLQ — PERMANENT DELIVERY FAILURE");
         log.error("║  eventId  : {}", event.getEventId());

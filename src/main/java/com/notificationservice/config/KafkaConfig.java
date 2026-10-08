@@ -1,6 +1,7 @@
 package com.notificationservice.config;
 
 import com.notificationservice.entity.NotificationEvent;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -9,9 +10,11 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.DependsOn;
+import org.springframework.context.annotation.Profile;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.config.TopicBuilder;
@@ -34,32 +37,40 @@ import java.util.Map;
  */
 @Configuration
 @EnableKafka
+@EnableConfigurationProperties(KafkaProperties.class)
 @Slf4j
-@DependsOn("embeddedKafkaBroker")
+@RequiredArgsConstructor
 public class KafkaConfig {
 
     @Bean
-    public NewTopic emailTopic(@Value("${kafka.topics.email}") String topic) {
-        return TopicBuilder.name(topic).partitions(3).replicas(1).build();
+    @Profile("!test")
+    public NewTopic emailTopic(@Value("${kafka.topics.email}") String topic,
+                               @Value("${kafka.topics.replication-factor:1}") short replicas) {
+        return TopicBuilder.name(topic).partitions(3).replicas(replicas).build();
     }
 
     @Bean
-    public NewTopic smsTopic(@Value("${kafka.topics.sms}") String topic) {
-        return TopicBuilder.name(topic).partitions(3).replicas(1).build();
+    @Profile("!test")
+    public NewTopic smsTopic(@Value("${kafka.topics.sms}") String topic,
+                             @Value("${kafka.topics.replication-factor:1}") short replicas) {
+        return TopicBuilder.name(topic).partitions(3).replicas(replicas).build();
     }
 
     @Bean
-    public NewTopic pushTopic(@Value("${kafka.topics.push}") String topic) {
-        return TopicBuilder.name(topic).partitions(3).replicas(1).build();
+    @Profile("!test")
+    public NewTopic pushTopic(@Value("${kafka.topics.push}") String topic,
+                              @Value("${kafka.topics.replication-factor:1}") short replicas) {
+        return TopicBuilder.name(topic).partitions(3).replicas(replicas).build();
     }
 
     @Bean
-    public NewTopic dlqTopic(@Value("${kafka.topics.dlq}") String topic) {
-        return TopicBuilder.name(topic).partitions(3).replicas(1).build();
+    @Profile("!test")
+    public NewTopic dlqTopic(@Value("${kafka.topics.dlq}") String topic,
+                             @Value("${kafka.topics.replication-factor:1}") short replicas) {
+        return TopicBuilder.name(topic).partitions(3).replicas(replicas).build();
     }
 
-    @Value("${spring.kafka.bootstrap-servers}")
-    private String bootstrapServers;
+    private final KafkaProperties kafkaProperties;
 
     @Value("${kafka.topics.dlq}")
     private String dlqTopic;
@@ -70,12 +81,14 @@ public class KafkaConfig {
     @Value("${kafka.consumer.retry.backoff-ms:2000}")
     private long retryBackoffMs;
 
+    @Value("${spring.kafka.listener.auto-startup:true}")
+    private boolean listenerAutoStartup;
+
     // ── Producer ─────────────────────────────────────────────────────────────
 
     @Bean
     public ProducerFactory<String, NotificationEvent> producerFactory() {
-        Map<String, Object> config = new HashMap<>();
-        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        Map<String, Object> config = new HashMap<>(kafkaProperties.buildProducerProperties());
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
         config.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -93,8 +106,7 @@ public class KafkaConfig {
 
     @Bean
     public ConsumerFactory<String, NotificationEvent> consumerFactory() {
-        Map<String, Object> config = new HashMap<>();
-        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        Map<String, Object> config = new HashMap<>(kafkaProperties.buildConsumerProperties());
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
@@ -142,6 +154,7 @@ public class KafkaConfig {
 
         factory.setCommonErrorHandler(errorHandler);
         factory.setConcurrency(3);
+        factory.setAutoStartup(listenerAutoStartup);
         return factory;
     }
 
@@ -156,6 +169,7 @@ public class KafkaConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        factory.setAutoStartup(listenerAutoStartup);
         return factory;
     }
 }

@@ -22,18 +22,24 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
      * Efficient status update without loading the full entity.
      * Used by consumers after successful delivery.
      */
-    @Modifying
-    @Query("UPDATE Notification n SET n.status = :status, n.updatedAt = CURRENT_TIMESTAMP WHERE n.eventId = :eventId")
-    int updateStatus(@Param("eventId") String eventId, @Param("status") Notification.NotificationStatus status);
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Notification n SET n.status = :status, n.updatedAt = CURRENT_TIMESTAMP " +
+            "WHERE n.eventId = :eventId AND n.status = :expectedStatus")
+    int updateStatusIfCurrent(@Param("eventId") String eventId,
+                              @Param("expectedStatus") Notification.NotificationStatus expectedStatus,
+                              @Param("status") Notification.NotificationStatus status);
 
     /**
      * Update status AND retry count atomically.
      * Used by DLQ consumer when a notification is permanently failed.
      */
-    @Modifying
-    @Query("UPDATE Notification n SET n.status = :status, n.retryCount = :retryCount, n.updatedAt = CURRENT_TIMESTAMP WHERE n.eventId = :eventId")
-    int updateStatusAndRetryCount(
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Notification n SET n.status = :status, n.retryCount = :retryCount, " +
+            "n.updatedAt = CURRENT_TIMESTAMP WHERE n.eventId = :eventId " +
+            "AND n.status = :expectedStatus")
+    int updateStatusAndRetryCountIfCurrent(
         @Param("eventId") String eventId,
+        @Param("expectedStatus") Notification.NotificationStatus expectedStatus,
         @Param("status") Notification.NotificationStatus status,
         @Param("retryCount") int retryCount
     );

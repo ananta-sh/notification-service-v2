@@ -1,6 +1,6 @@
 # Distributed Notification Service
 
-A distributed notification service built with **Spring Boot**, **Apache Kafka**, and **MySQL**. It routes email, SMS, and push notifications to isolated Kafka topics and consumer groups, with a transactional outbox, idempotent submission, retries, and dead-letter handling. Provider delivery is simulated by `MockDeliveryService`.
+A distributed notification service built with **Spring Boot**, **Apache Kafka**, and **Spring Data JPA**. It routes email, SMS, and push notifications to isolated Kafka topics and consumer groups, with a transactional outbox, idempotent submission, retries, and dead-letter handling. Local delivery is simulated; `NotificationDeliveryProvider` is the adapter boundary for real providers.
 
 ---
 
@@ -12,11 +12,11 @@ Client
   ▼
 POST /api/v1/notifications
   │
-  ├─ Idempotency Check (DB unique constraint on eventId)
-  │    ├─ Duplicate → 200 OK  (no reprocessing)
-  │    └─ New       → Save PENDING + outbox row → 202 Accepted
+  ├─ Idempotency check (unique eventId)
+  │    ├─ Duplicate → 200 OK
+  │    └─ New       → Save PENDING + outbox row in one transaction → 202
   │                                    │
-  │                             Outbox poller publishes
+  │                  Leased outbox poller publishes confirmed events
   │
   ▼
 Kafka Topics (3 partitions each; Kafka key = userId)
@@ -58,7 +58,9 @@ Kafka Topics (3 partitions each; Kafka key = userId)
 mvn spring-boot:run
 ```
 
-The app starts with an embedded Kafka broker and an in-memory H2 database. Kafka topics are created automatically. No Kafka container or Docker installation is needed.
+The default `local` profile starts an embedded Kafka broker and in-memory H2 database. Kafka topics are created automatically. No Kafka container or Docker installation is needed.
+
+The outbox poller uses database leases so app replicas cannot claim the same row. It only claims the oldest unpublished event per topic and user key, preserving order while processing different users concurrently.
 
 To run with MySQL instead, start the optional database container:
 
@@ -66,7 +68,22 @@ To run with MySQL instead, start the optional database container:
 docker compose up -d mysql
 ```
 
-Then set `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD` to the MySQL connection details before launching the app. The app starts on **port 8080**. The embedded broker listens on port **19092**; override `SPRING_KAFKA_BOOTSTRAP_SERVERS` only when using an external Kafka broker.
+Then set `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD` to the MySQL connection details before launching the app. Flyway manages schema migrations and Hibernate validates the resulting schema.
+
+### Run with production infrastructure
+
+Activate the `prod` profile to disable the embedded broker and use external MySQL and Kafka:
+
+```powershell
+$env:SPRING_PROFILES_ACTIVE = "prod"
+$env:SPRING_DATASOURCE_URL = "jdbc:mysql://localhost:3306/notificationdb"
+$env:SPRING_DATASOURCE_USERNAME = "notification_user"
+$env:SPRING_DATASOURCE_PASSWORD = "<your-secret>"
+$env:SPRING_KAFKA_BOOTSTRAP_SERVERS = "kafka-1:9092,kafka-2:9092"
+mvn spring-boot:run
+```
+
+The profile disables the H2 console and Swagger endpoints, validates the migrated schema, and defaults topic replication to three. The Kafka cluster needs enough brokers to satisfy that replication factor.
 
 ---
 
@@ -173,13 +190,18 @@ Auto-commit risks losing messages if the consumer crashes between reading a reco
 A slow email SMTP server shouldn't block SMS or push delivery. Independent topics mean independent consumer groups and independent scaling — add more email consumers without touching SMS infrastructure.
 
 ### How is per-user ordering maintained?
-The producer and transactional outbox use `userId` as the Kafka record key. Kafka assigns records with the same key to the same partition, preserving their order within each channel topic while allowing different partitions to be processed in parallel. Separate channel topics do not provide a total order across email, SMS, and push.
+The transactional outbox uses `userId` as the Kafka record key. Kafka assigns records with the same key to the same partition, and the outbox only publishes the oldest outstanding event per key and topic. Separate channel topics do not provide a total order across email, SMS, and push.
+
+### How are duplicate deliveries limited?
+Consumers acknowledge Kafka replays without calling the provider again when the notification is already `DELIVERED` or `FAILED`. The `NotificationDeliveryProvider` receives the event ID as an idempotency key; real adapters should forward it to a provider API that supports idempotent requests. Exactly-once external effects cannot be guaranteed across a process crash.
 
 ### Why `DefaultErrorHandler` over `@RetryableTopic`?
 `DefaultErrorHandler` with `FixedBackOff` retries in-memory (no additional Kafka topics created, no extra consumer group lag). For local dev and portfolio purposes this is simpler to reason about. `@RetryableTopic` is preferable in production when you need durable retry queues (retries survive app restarts).
 
 ### Why 3 partitions?
 Each consumer group can have at most one active consumer per partition. Three partitions allow up to three active consumers per channel group; scale each channel independently.
+
+Run the behavioral and context tests from this directory with `mvn test`. They cover duplicate and concurrent submissions, outbox claim ordering, and delivery replay suppression.
 
 ---
 

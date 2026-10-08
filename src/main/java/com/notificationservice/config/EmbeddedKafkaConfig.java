@@ -4,6 +4,7 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
 import org.springframework.kafka.test.EmbeddedKafkaZKBroker;
 
@@ -12,6 +13,7 @@ import org.springframework.kafka.test.EmbeddedKafkaZKBroker;
  * does not need to be installed separately or started with Docker.
  */
 @Configuration
+@Profile("local")
 @Slf4j
 public class EmbeddedKafkaConfig {
 

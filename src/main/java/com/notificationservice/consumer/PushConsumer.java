@@ -4,7 +4,7 @@ import com.notificationservice.entity.NotificationEvent;
 import com.notificationservice.exception.DeliveryException;
 import com.notificationservice.metrics.NotificationMetrics;
 import com.notificationservice.service.ChannelRateLimiterService;
-import com.notificationservice.service.MockDeliveryService;
+import com.notificationservice.service.NotificationDeliveryProvider;
 import com.notificationservice.service.NotificationService;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
 public class PushConsumer {
 
     private final NotificationService notificationService;
-    private final MockDeliveryService mockDeliveryService;
+    private final NotificationDeliveryProvider deliveryProvider;
     private final ChannelRateLimiterService rateLimiter;
     private final NotificationMetrics metrics;
 
@@ -36,12 +36,18 @@ public class PushConsumer {
         NotificationEvent event = record.value();
         log.debug("[{}] Received | eventId={} partition={}", CHANNEL, event.getEventId(), record.partition());
 
+        if (notificationService.isTerminal(event.getEventId())) {
+            log.info("[{}] Skipping already completed eventId={}", CHANNEL, event.getEventId());
+            ack.acknowledge();
+            return;
+        }
+
         rateLimiter.acquire(CHANNEL); // 100/sec — FCM/APNs constraint
 
         Timer.Sample timerSample = metrics.startDeliveryTimer();
         boolean success = false;
         try {
-            mockDeliveryService.deliver(CHANNEL, event.getRecipient(), event.getMessage(), event.getEventId());
+            deliveryProvider.deliver(CHANNEL, event.getRecipient(), event.getMessage(), event.getEventId());
             success = true;
             notificationService.markDelivered(event.getEventId(), CHANNEL);
             ack.acknowledge();

@@ -4,15 +4,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.notificationservice.entity.NotificationEvent;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import org.springframework.data.domain.PageRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.time.LocalDateTime;
 
 /**
  * The OutboxPoller is the engine of the Transactional Outbox Pattern.
@@ -35,10 +34,11 @@ import java.time.LocalDateTime;
  *     bridge to Kafka.
  */
 @Component
+@ConditionalOnProperty(name = "outbox.poll.enabled", havingValue = "true", matchIfMissing = true)
 @Slf4j
 public class OutboxPoller {
 
-    private final OutboxRepository outboxRepository;
+    private final OutboxClaimService outboxClaimService;
     private final KafkaTemplate<String, NotificationEvent> kafkaTemplate;
     private final ObjectMapper objectMapper;
 
@@ -46,14 +46,11 @@ public class OutboxPoller {
     private final Counter publishedCounter;
     private final Counter failedCounter;
 
-    @Value("${outbox.poll.interval-ms:2000}")
-    private long pollIntervalMs;
-
-    public OutboxPoller(OutboxRepository outboxRepository,
+    public OutboxPoller(OutboxClaimService outboxClaimService,
                         KafkaTemplate<String, NotificationEvent> kafkaTemplate,
                         ObjectMapper objectMapper,
                         MeterRegistry meterRegistry) {
-        this.outboxRepository = outboxRepository;
+        this.outboxClaimService = outboxClaimService;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
         this.publishedCounter = Counter.builder("outbox.published.total")
@@ -71,7 +68,7 @@ public class OutboxPoller {
      */
     @Scheduled(fixedDelayString = "${outbox.poll.interval-ms:2000}")
     public void pollAndPublish() {
-        List<OutboxEvent> pending = outboxRepository.findByPublishedFalseOrderByCreatedAtAsc(PageRequest.of(0, 100));
+        List<OutboxClaim> pending = outboxClaimService.claimBatch();
 
         if (pending.isEmpty()) {
             return; // nothing to do, skip noisy log
@@ -79,19 +76,26 @@ public class OutboxPoller {
 
         log.debug("[OutboxPoller] Found {} unpublished event(s) to publish", pending.size());
 
-        for (OutboxEvent outboxEvent : pending) {
+        for (OutboxClaim outboxEvent : pending) {
             try {
+                if (!outboxClaimService.renew(outboxEvent)) {
+                    log.warn("Outbox claim was taken over before publish | eventId={}", outboxEvent.eventId());
+                    continue;
+                }
                 // Deserialize stored JSON payload back to NotificationEvent
                 NotificationEvent event = objectMapper.readValue(
-                        outboxEvent.getPayload(), NotificationEvent.class);
+                        outboxEvent.payload(), NotificationEvent.class);
 
                 // Wait for Kafka's broker acknowledgement before the next poll can
                 // select this row again. A crash after this point can still replay it.
                 var result = kafkaTemplate.send(
-                        outboxEvent.getTopic(), outboxEvent.getMessageKey(), event).get();
-                outboxRepository.markAsPublished(outboxEvent.getId(), LocalDateTime.now());
+                        outboxEvent.topic(), outboxEvent.messageKey(), event).get();
+                if (!outboxClaimService.markPublished(outboxEvent)) {
+                    log.warn("Outbox claim expired before publish confirmation | eventId={}", outboxEvent.eventId());
+                    continue;
+                }
                 log.info("[OutboxPoller] ✓ Published eventId={} → topic={} | partition={} offset={}",
-                        outboxEvent.getEventId(),
+                        outboxEvent.eventId(),
                         result.getRecordMetadata().topic(),
                         result.getRecordMetadata().partition(),
                         result.getRecordMetadata().offset());
@@ -99,8 +103,8 @@ public class OutboxPoller {
 
             } catch (Exception e) {
                 log.error("[OutboxPoller] Failed to process outbox row id={} | error={}",
-                        outboxEvent.getId(), e.getMessage());
-                outboxRepository.incrementAttemptCount(outboxEvent.getId());
+                        outboxEvent.id(), e.getMessage());
+                outboxClaimService.releaseAfterFailure(outboxEvent);
                 failedCounter.increment();
             }
         }
