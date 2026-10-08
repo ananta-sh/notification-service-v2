@@ -21,7 +21,7 @@ public class DlqConsumer {
     @KafkaListener(
         topics = "${kafka.topics.dlq}",
         groupId = "notification-dlq-group",
-        containerFactory = "kafkaListenerContainerFactory"
+        containerFactory = "dlqKafkaListenerContainerFactory"
     )
     public void consume(ConsumerRecord<String, NotificationEvent> record, Acknowledgment ack) {
         NotificationEvent event = record.value();

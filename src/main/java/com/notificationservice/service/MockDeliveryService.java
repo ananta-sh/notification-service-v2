@@ -1,6 +1,7 @@
 package com.notificationservice.service;
 
 import com.notificationservice.exception.DeliveryException;
+import com.notificationservice.entity.NotificationEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,10 @@ public class MockDeliveryService {
     private double failureRate;
 
     private final Random random = new Random();
+
+    public void deliver(NotificationEvent event, String channel) {
+        deliver(channel, event.getRecipient(), event.getMessage(), event.getEventId());
+    }
 
     public void deliver(String channel, String recipient, String message, String eventId) {
 

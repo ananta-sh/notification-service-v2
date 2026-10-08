@@ -10,10 +10,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.List;
+import java.time.LocalDateTime;
 
 /**
  * The OutboxPoller is the engine of the Transactional Outbox Pattern.
@@ -71,7 +70,6 @@ public class OutboxPoller {
      * preventing overlapping polls if Kafka is slow.
      */
     @Scheduled(fixedDelayString = "${outbox.poll.interval-ms:2000}")
-    @Transactional
     public void pollAndPublish() {
         List<OutboxEvent> pending = outboxRepository.findByPublishedFalseOrderByCreatedAtAsc(PageRequest.of(0, 100));
 
@@ -87,25 +85,17 @@ public class OutboxPoller {
                 NotificationEvent event = objectMapper.readValue(
                         outboxEvent.getPayload(), NotificationEvent.class);
 
-                // Publish to the stored topic (email/sms/push)
-                kafkaTemplate.send(outboxEvent.getTopic(), outboxEvent.getMessageKey(), event)
-                        .whenComplete((result, ex) -> {
-                            if (ex != null) {
-                                log.error("[OutboxPoller] Kafka publish failed | eventId={} | error={}",
-                                        outboxEvent.getEventId(), ex.getMessage());
-                                outboxRepository.incrementAttemptCount(outboxEvent.getId());
-                                failedCounter.increment();
-                            } else {
-                                // Mark as published only after Kafka confirms
-                                outboxRepository.markAsPublished(outboxEvent.getId(), LocalDateTime.now());
-                                log.info("[OutboxPoller] ✓ Published eventId={} → topic={} | partition={} offset={}",
-                                        outboxEvent.getEventId(),
-                                        result.getRecordMetadata().topic(),
-                                        result.getRecordMetadata().partition(),
-                                        result.getRecordMetadata().offset());
-                                publishedCounter.increment();
-                            }
-                        });
+                // Wait for Kafka's broker acknowledgement before the next poll can
+                // select this row again. A crash after this point can still replay it.
+                var result = kafkaTemplate.send(
+                        outboxEvent.getTopic(), outboxEvent.getMessageKey(), event).get();
+                outboxRepository.markAsPublished(outboxEvent.getId(), LocalDateTime.now());
+                log.info("[OutboxPoller] ✓ Published eventId={} → topic={} | partition={} offset={}",
+                        outboxEvent.getEventId(),
+                        result.getRecordMetadata().topic(),
+                        result.getRecordMetadata().partition(),
+                        result.getRecordMetadata().offset());
+                publishedCounter.increment();
 
             } catch (Exception e) {
                 log.error("[OutboxPoller] Failed to process outbox row id={} | error={}",
