@@ -24,7 +24,7 @@ sequenceDiagram
         DB-->>API: Commit
         API-->>Client: 202 Accepted
         Poller->>DB: Claim eligible outbox rows with leases
-        Poller->>Kafka: Publish event, keyed by userId; wait for broker ack
+        Poller->>Kafka: Publish event keyed by userId and wait for broker acknowledgment
         Poller->>DB: Mark published after broker ack
         Kafka->>Consumer: Deliver from channel topic
         Consumer->>DB: Skip if event is already terminal
