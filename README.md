@@ -86,7 +86,13 @@ The channel consumers share a provider interface and the same delivery/state-tra
 
 ## Run locally
 
-Run these commands from the application module directory (`notification-service-v2`):
+### Prerequisites
+
+- Java 17 (a JDK, not only a JRE)
+- Maven 3.9 or later
+- Docker Desktop only if you want to use the optional MySQL container; the default local profile needs no Docker or separately installed Kafka
+
+The repository root is the workspace/aggregator. The Spring Boot application, this README, its `pom.xml`, and `docker-compose.yml` are in the nested `notification-service-v2` module. Run the application commands below from that module directory:
 
 ```bash
 mvn spring-boot:run
@@ -141,6 +147,22 @@ New event: **202 Accepted**, with `status: PENDING`. Reusing the same `eventId`:
 
 `channel` accepts `EMAIL`, `SMS`, or `PUSH`. Request validation errors return **400 Bad Request** with field-level details.
 
+### SMS and PUSH examples
+
+Use a new `eventId` for each logical notification. SMS and PUSH use the same endpoint and payload shape; only the channel and recipient format change.
+
+```bash
+# SMS
+curl -X POST http://localhost:8080/api/v1/notifications \
+  -H "Content-Type: application/json" \
+  -d '{"eventId":"660e8400-e29b-41d4-a716-446655440001","userId":"user-123","channel":"SMS","recipient":"+14155552671","message":"Your verification code is 847291"}'
+
+# PUSH (recipient is a device token in this example)
+curl -X POST http://localhost:8080/api/v1/notifications \
+  -H "Content-Type: application/json" \
+  -d '{"eventId":"770e8400-e29b-41d4-a716-446655440002","userId":"user-456","channel":"PUSH","recipient":"device-token-example","message":"You have a new message"}'
+```
+
 ### Check status
 
 ```bash
@@ -193,7 +215,20 @@ From the workspace root, run:
 mvn test
 ```
 
-The test profile uses an isolated database/configuration and disables listener auto-start. The current suite covers application context setup, sequential/concurrent idempotent submissions, outbox claiming/order, conditional terminal state transitions, and consumer replay suppression.
+The test profile uses an isolated database/configuration and disables listener auto-start. The current six tests cover the JPA test-slice context, sequential and concurrent idempotent submissions, outbox claim/order behavior, conditional terminal-state transitions, and email-consumer replay suppression. They are focused behavior tests, not a full end-to-end test against external MySQL/Kafka or real delivery providers.
+
+## Project status and limitations
+
+This is a portfolio/local-development implementation of the notification flow. Before using it for real customer notifications, account for these current boundaries:
+
+- Delivery is simulated by `MockDeliveryService`; no real email, SMS, or push provider adapter is included.
+- The REST API has no authentication or authorization configured. Do not expose it publicly as-is.
+- Retries use Spring Kafka's in-memory error handler, and channel rate limiters are local to each application instance. Durable retry queues and shared quota enforcement need additional infrastructure.
+- Kafka is embedded for local runs. The `prod` profile expects an external Kafka cluster and MySQL, but does not configure cluster security, topic retention/monitoring, deployment orchestration, or alerting.
+- The production profile exposes the Prometheus Actuator path, but the Prometheus registry dependency is not currently included. Add `micrometer-registry-prometheus` to enable Prometheus scrape output.
+- The repository includes an unused `NotificationProducer` helper; actual event publication follows the transactional outbox path through `OutboxPoller`.
+
+These are extension points and deployment requirements, not guarantees provided by the current local demo.
 
 ## Repository layout
 
