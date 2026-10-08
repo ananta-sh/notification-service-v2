@@ -50,11 +50,11 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- H2 for lightweight tests -->
+        <!-- H2 for Docker-free local development and tests -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <scope>test</scope>
+            <scope>runtime</scope>
         </dependency>
 
         <!-- Kafka -->
@@ -63,11 +63,10 @@
             <artifactId>spring-kafka</artifactId>
         </dependency>
 
-        <!-- Embedded Kafka is used by tests only -->
+        <!-- Embedded Kafka enables local runs without a Kafka installation or Docker -->
         <dependency>
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka-test</artifactId>
-            <scope>test</scope>
         </dependency>
 
         <!-- Jackson -->

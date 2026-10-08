@@ -41,8 +41,8 @@ Kafka Topics (3 partitions each; Kafka key = userId)
 | Component | Technology |
 |-----------|------------|
 | Framework | Spring Boot 3.5.16 |
-| Messaging | Apache Kafka 4.1.1 (Docker Compose broker) |
-| Database  | MySQL 8.4 (via Spring Data JPA) |
+| Messaging | Apache Kafka (embedded broker for local runs) |
+| Database  | H2 by default; MySQL optional (via Spring Data JPA) |
 | Retry/DLQ | Spring Kafka DefaultErrorHandler + DeadLetterPublishingRecoverer |
 | Container | Docker + Docker Compose |
 | Build     | Maven |
@@ -52,21 +52,21 @@ Kafka Topics (3 partitions each; Kafka key = userId)
 
 ## Quick Start
 
-### 1. Start infrastructure
-
-```bash
-docker compose up -d
-```
-
-Wait ~30 seconds for Kafka and MySQL to be healthy.
-
-### 2. Run the application
+### Run locally without Docker
 
 ```bash
 mvn spring-boot:run
 ```
 
-The app starts on **port 8080**. Hibernate updates the MySQL schema, and Spring Kafka creates the channel and DLQ topics with three partitions. Set `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, or `SPRING_KAFKA_BOOTSTRAP_SERVERS` to use non-default services.
+The app starts with an embedded Kafka broker and an in-memory H2 database. Kafka topics are created automatically. No Kafka container or Docker installation is needed.
+
+To run with MySQL instead, start the optional database container:
+
+```bash
+docker compose up -d mysql
+```
+
+Then set `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD` to the MySQL connection details before launching the app. The app starts on **port 8080**. The embedded broker listens on port **19092**; override `SPRING_KAFKA_BOOTSTRAP_SERVERS` only when using an external Kafka broker.
 
 ---
 
@@ -239,5 +239,5 @@ Then poll the status endpoint to confirm the event is marked `FAILED`.
 
 ```bash
 # Stop the app (Ctrl+C), then:
-docker compose down -v   # -v removes MySQL and Kafka volumes (clean slate)
+docker compose down -v   # -v removes the optional MySQL volume (clean slate)
 ```
